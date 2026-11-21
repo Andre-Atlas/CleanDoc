@@ -1,0 +1,64 @@
+/* Espelho das variáveis do Figma "Doc Cleaner" (coleções Color · Light/Dark e Size). Não use valores soltos fora daqui. */
+:root {
+  --bg-canvas: #FAFAF9;
+  --bg-surface: #FFFFFF;
+  --bg-subtle: #F4F4F2;
+  --border-default: #E7E6E3;
+  --border-strong: #D4D3CF;
+  /* bordas de controles interativos: ≥ 3:1 (WCAG 1.4.11) */
+  --border-control: #8A8984;
+  --switch-knob: #FFFFFF;
+  --text-primary: #1C1C1A;
+  --text-secondary: #5C5B55;
+  --text-muted: #75746C;
+  --accent-default: #0F766E;
+  --accent-hover: #115E59;
+  --accent-subtle: #E6F4F1;
+  --accent-on: #FFFFFF;
+  --status-success: #15803D;
+  --status-warning: #B45309;
+  --status-danger: #B91C1C;
+  --status-success-subtle: #DCFCE7;
+  --status-warning-subtle: #FEF3C7;
+  --status-danger-subtle: #FEE2E2;
+  --focus-ring: #0F766E;
+  --mask-pessoa-bg: #EDE9FE; --mask-pessoa-text: #5B21B6;
+  --mask-empresa-bg: #DBEAFE; --mask-empresa-text: #1E40AF;
+  --mask-local-bg: #DCFCE7; --mask-local-text: #166534;
+  --mask-valor-bg: #FEF3C7; --mask-valor-text: #92400E;
+  --mask-documento-bg: #FFE4E6; --mask-documento-text: #9F1239;
+  --mask-contato-bg: #CFFAFE; --mask-contato-text: #155E75;
+  --mask-bancario-bg: #FFEDD5; --mask-bancario-text: #9A3412;
+  --mask-outro-bg: #F4F4F2; --mask-outro-text: #3F3E3A;
+
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px;
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px; --radius-full: 999px;
+
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --elevation-1: 0 1px 2px rgb(18 18 15 / 6%), 0 8px 24px -4px rgb(18 18 15 / 6%);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --bg-canvas: #111110; --bg-surface: #1C1C1A; --bg-subtle: #262624;
+    --border-default: #33322F; --border-strong: #46453F; --border-control: #77766F;
+    --text-primary: #F4F4F2; --text-secondary: #B5B4AE; --text-muted: #8E8D86;
+    --accent-default: #2DD4BF; --accent-hover: #5EEAD4; --accent-subtle: #10302C; --accent-on: #042F2E;
+    --status-success: #4ADE80; --status-warning: #FBBF24; --status-danger: #F87171;
+    --status-success-subtle: #0B2E17; --status-warning-subtle: #3A2604; --status-danger-subtle: #3B0D0D;
+    --focus-ring: #2DD4BF;
+    --mask-pessoa-bg: #2E1065; --mask-pessoa-text: #DDD6FE;
+    --mask-empresa-bg: #172554; --mask-empresa-text: #BFDBFE;
+    --mask-local-bg: #052E16; --mask-local-text: #BBF7D0;
+    --mask-valor-bg: #451A03; --mask-valor-text: #FDE68A;
+    --mask-documento-bg: #4C0519; --mask-documento-text: #FECDD3;
+    --mask-contato-bg: #083344; --mask-contato-text: #A5F3FC;
+    --mask-bancario-bg: #431407; --mask-bancario-text: #FED7AA;
+    --mask-outro-bg: #262624; --mask-outro-text: #D4D3CF;
+    --elevation-1: 0 1px 2px rgb(0 0 0 / 40%), 0 8px 24px -4px rgb(0 0 0 / 40%);
+  }
+}

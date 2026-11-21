@@ -1,0 +1,48 @@
+{
+  "precisao_caracteres": 0.9401,
+  "categorias": [
+    {
+      "categoria": "pessoa",
+      "ocorrencias": 1751,
+      "recall_mascarado": 1,
+      "recall_categoria_exata": 1
+    },
+    {
+      "categoria": "empresa",
+      "ocorrencias": 1097,
+      "recall_mascarado": 1,
+      "recall_categoria_exata": 0.9517
+    },
+    {
+      "categoria": "local",
+      "ocorrencias": 1105,
+      "recall_mascarado": 1,
+      "recall_categoria_exata": 0.8887
+    },
+    {
+      "categoria": "valor",
+      "ocorrencias": 681,
+      "recall_mascarado": 1,
+      "recall_categoria_exata": 1
+    },
+    {
+      "categoria": "documento",
+      "ocorrencias": 454,
+      "recall_mascarado": 1,
+      "recall_categoria_exata": 1
+    },
+    {
+      "categoria": "contato",
+      "ocorrencias": 302,
+      "recall_mascarado": 1,
+      "recall_categoria_exata": 1
+    },
+    {
+      "categoria": "bancario",
+      "ocorrencias": 266,
+      "recall_mascarado": 1,
+      "recall_categoria_exata": 1
+    }
+  ],
+  "exemplos_de_falha": []
+}
