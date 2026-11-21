@@ -82,6 +82,6 @@ Site estático. Na Vercel: importe o repositório (framework Vite). O `prebuild`
 
 ## Licenças
 
-- Código: AGPL-3.0-or-later, por causa do mupdf.js (AGPL).
+- Código: Copyright (c) 2026 André Acioli, sob AGPL-3.0-or-later (ver `LICENSE`). A AGPL é exigida pelo mupdf.js, usado na redação real de PDF.
 - Modelo NER: [`augustaklug/legal-bert-ner-base-cased-ptbr-onnx`](https://huggingface.co/augustaklug/legal-bert-ner-base-cased-ptbr-onnx), CC-BY-4.0, derivado de `dominguesm/legal-bert-ner-base-cased-ptbr` (BERTimbau ajustado em LeNER-Br).
 - Nomes do gazetteer vêm do Faker pt_BR (MIT).
