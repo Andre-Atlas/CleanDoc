@@ -40,3 +40,45 @@ for (const f of ['ort-wasm-simd-threaded.asyncify.mjs', 'ort-wasm-simd-threaded.
   await copyFile(resolve(import.meta.dirname, '../node_modules/onnxruntime-web/dist', f), resolve(ORT, f));
   console.log('copiado', f);
 }
+
+// Modelo OCR PT-BR (Tesseract 4.0.0_fast, ~1 MB) + runtime WASM self-hosted: sem CDN em produção.
+const OCR_MODEL_URL = 'https://raw.githubusercontent.com/naptha/tessdata/gh-pages/4.0.0_fast/por.traineddata.gz';
+const OCR_MODEL_SHA256 = '7b0f1749aa255a593b14160c75f74690be740edcae94c5a45efc24ab50235f4d';
+const OCR_MODEL_DEST = resolve(import.meta.dirname, '../public/models/ocr/por.traineddata.gz');
+let ocrCached = false;
+try {
+  if ((await stat(OCR_MODEL_DEST)).size > 0 && sha(await readFile(OCR_MODEL_DEST)) === OCR_MODEL_SHA256) {
+    console.log('ok (cache) ocr/por.traineddata.gz');
+    ocrCached = true;
+  }
+} catch {}
+if (!ocrCached) {
+  const r = await fetch(OCR_MODEL_URL);
+  if (!r.ok) throw new Error(`por.traineddata.gz: HTTP ${r.status}`);
+  await mkdir(dirname(OCR_MODEL_DEST), { recursive: true });
+  const buf = Buffer.from(await r.arrayBuffer());
+  if (sha(buf) !== OCR_MODEL_SHA256) throw new Error('por.traineddata.gz: SHA-256 não confere');
+  await writeFile(OCR_MODEL_DEST, buf);
+  console.log('baixado ocr/por.traineddata.gz');
+}
+
+const OCR_DIR = resolve(import.meta.dirname, '../public/ocr');
+await mkdir(OCR_DIR, { recursive: true });
+await copyFile(resolve(import.meta.dirname, '../node_modules/tesseract.js/dist/worker.min.js'), resolve(OCR_DIR, 'worker.min.js'));
+for (const f of [
+  'tesseract-core-relaxedsimd-lstm.wasm.js',
+  'tesseract-core-relaxedsimd-lstm.wasm',
+  'tesseract-core-relaxedsimd.wasm.js',
+  'tesseract-core-relaxedsimd.wasm',
+  'tesseract-core-simd-lstm.wasm.js',
+  'tesseract-core-simd-lstm.wasm',
+  'tesseract-core-lstm.wasm.js',
+  'tesseract-core-lstm.wasm',
+  'tesseract-core-simd.wasm.js',
+  'tesseract-core-simd.wasm',
+  'tesseract-core.wasm.js',
+  'tesseract-core.wasm',
+]) {
+  await copyFile(resolve(import.meta.dirname, '../node_modules/tesseract.js-core', f), resolve(OCR_DIR, f));
+}
+console.log('copiado runtime OCR (tesseract.js)');

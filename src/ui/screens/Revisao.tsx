@@ -261,6 +261,7 @@ function MetaList({ file }: { file?: FileItem }) {
     kind === 'pdf' ? ['Autor, título, software e datas', 'Metadados XMP e ID do documento', "Marcas d'água e camadas de marca d'água", 'Arquivos anexados']
     : kind === 'docx' ? ['Autor, empresa e datas do arquivo', 'Comentários e histórico de revisões', "Marca d'água nos cabeçalhos", 'EXIF/GPS das imagens', 'Variáveis e modelo do documento']
     : kind === 'xlsx' ? ['Autor, empresa e datas do arquivo', 'Comentários, notas e autores', 'Caminho do arquivo no computador', 'Vínculos externos', 'EXIF/GPS das imagens']
+    : kind === 'image' ? ['Metadados EXIF, XMP e IPTC (recodificação PNG)', "Marcas d'água claras/diagonais (quando habilitado)"]
     : ['CSV não tem metadados embutidos'];
   return (
     <div className="stack gap-2" style={{ paddingTop: 20 }}>

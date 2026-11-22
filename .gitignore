@@ -6,8 +6,10 @@ coverage
 test-results
 playwright-report
 public/models/ner/
+public/models/ocr/
+public/ort/
+public/ocr/
 ml/.venv
 ml/**/__pycache__
 *.tsbuildinfo
 .DS_Store
-public/ort/

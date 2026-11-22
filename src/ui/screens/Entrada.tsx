@@ -1,40 +1,49 @@
-import { useRef, useState, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { LARGE_FILE_WARN_BYTES } from '../../formats/types';
 import { Badge, Button, Icon, ProgressBar, TermInput, formatBytes } from '../components';
-import type { FileItem, ModelState } from '../useCleaner';
+import type { FileItem, FileRejection, ModelState } from '../useCleaner';
 import { countTerms, type TermFields } from '../review';
-
-type Rejection = { name: string; reason: 'formato' | 'tamanho' | 'duplicado' };
 
 interface Props {
   files: FileItem[];
   models: ModelState;
   terms: TermFields;
   onTerms: (t: TermFields) => void;
-  onAdd: (files: File[]) => Rejection[];
+  stripRasterWatermark: boolean;
+  onStripRasterWatermark: (v: boolean) => void;
+  onAdd: (files: File[]) => Promise<FileRejection[]>;
   onRemove: (id: string) => void;
   onClear: () => void;
   onStart: () => void;
   onContinue: () => void;
 }
 
-const REASON: Record<Rejection['reason'], [string, string]> = {
-  formato: ['Formato não suportado', 'use PDF, DOCX, XLSX ou CSV'],
-  tamanho: ['Arquivo grande demais', 'limite de 50 MB por arquivo'],
+const REASON: Record<FileRejection['reason'], [string, string]> = {
+  formato: ['Formato não suportado', 'use PDF, DOCX, XLSX, CSV, PNG, JPG, WEBP ou ZIP'],
+  tamanho: ['Arquivo grande demais', 'limite de 500 MB por arquivo'],
   duplicado: ['Arquivo já adicionado', 'ignorado para não processar duas vezes'],
+  zip: ['Aviso ao ler ZIP', 'verifique o conteúdo do pacote'],
 };
 
-export function Entrada({ files, models, terms, onTerms, onAdd, onRemove, onClear, onStart, onContinue }: Props) {
+export function Entrada({ files, models, terms, onTerms, stripRasterWatermark, onStripRasterWatermark, onAdd, onRemove, onClear, onStart, onContinue }: Props) {
   const [dragging, setDragging] = useState(false);
-  const [rejected, setRejected] = useState<Rejection[]>([]);
+  const [rejected, setRejected] = useState<FileRejection[]>([]);
   const [open, setOpen] = useState(true);
   const input = useRef<HTMLInputElement>(null);
+  const reqIdRef = useRef(0);
+  useEffect(() => () => { reqIdRef.current++; }, []);
   const queued = files.filter((f) => f.status === 'fila' || f.status === 'erro');
   const analyzed = files.filter((f) => f.status === 'pronto');
   const total = files.reduce((s, f) => s + f.file.size, 0);
+  const hasLargeFile = files.some((f) => f.file.size > LARGE_FILE_WARN_BYTES);
+  const watermarkLocked = analyzed.length > 0 && queued.length === 0;
 
   const take = (list: FileList | null) => {
     if (!list?.length) return;
-    setRejected(onAdd([...list]));
+    const reqId = ++reqIdRef.current;
+    void onAdd([...list])
+      .then((res) => { if (reqId === reqIdRef.current) setRejected(res); })
+      .catch(() => { if (reqId === reqIdRef.current) setRejected([{ name: list[0]?.name ?? 'arquivo', reason: 'zip', detail: 'falha inesperada ao ler os arquivos' }]); });
   };
   const onDrop = (e: DragEvent) => { e.preventDefault(); setDragging(false); take(e.dataTransfer.files); };
   const err = rejected[0];
@@ -63,41 +72,57 @@ export function Entrada({ files, models, terms, onTerms, onAdd, onRemove, onClea
         >
           <span className="dz-icon"><Icon name={err ? 'alert' : 'upload'} size={22} /></span>
           <span className="t-heading">{dragging ? 'Solte para adicionar' : err ? REASON[err.reason][0] : 'Arraste seus arquivos aqui'}</span>
-          <span id="dz-hint" className="t-caption c-secondary">PDF, DOCX, XLSX ou CSV · vários de uma vez · até 50 MB cada</span>
+          <span id="dz-hint" className="t-caption c-secondary">PDF, DOCX, XLSX, CSV, imagens (PNG/JPG/WEBP) ou ZIP · vários de uma vez · até 500 MB cada</span>
           {!dragging && <span className="t-label c-accent">ou clique para selecionar</span>}
         </div>
-        <input ref={input} type="file" multiple hidden accept=".pdf,.docx,.xlsx,.csv" onChange={(e) => { take(e.target.files); e.target.value = ''; }} />
+        <input ref={input} type="file" multiple hidden accept=".pdf,.docx,.xlsx,.csv,.png,.jpg,.jpeg,.webp,.zip" onChange={(e) => { take(e.target.files); e.target.value = ''; }} />
         <div role="alert" className="t-caption c-danger">
-          {err && `${REASON[err.reason][0]}: ${err.name} · ${REASON[err.reason][1]}${rejected.length > 1 ? ` (+${rejected.length - 1} ${rejected.length - 1 === 1 ? 'outro' : 'outros'})` : ''}`}
+          {err && `${REASON[err.reason][0]}: ${err.name} · ${err.detail ?? REASON[err.reason][1]}${rejected.length > 1 ? ` (+${rejected.length - 1} ${rejected.length - 1 === 1 ? 'outro' : 'outros'})` : ''}`}
         </div>
+        {hasLargeFile && (
+          <p role="status" className="t-caption c-secondary">
+            Arquivo acima de 100 MB detectado: o processamento local pode levar alguns minutos e requer memória livre no navegador.
+          </p>
+        )}
       </div>
 
       {files.length > 0 && (
         <section className="stack gap-2" aria-label="Arquivos adicionados">
           <div className="row between">
             <span className="t-label c-secondary">{files.length} {files.length === 1 ? 'arquivo' : 'arquivos'} · {formatBytes(total)}</span>
-            <button className="link" onClick={() => { setRejected([]); onClear(); }}>Remover todos</button>
+            <button className="link" onClick={() => { reqIdRef.current++; setRejected([]); onClear(); }}>Remover todos</button>
           </div>
           <ul className="stack gap-2" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
             {files.map((f) => {
               const done = f.status === 'pronto';
+              const label = f.relativePath ?? f.file.name;
               return (
                 <li key={f.id} className="file-row">
                   <span className="file-icon"><Icon name="file" size={18} /></span>
                   <span className="file-text">
-                    <span className="t-strong truncate">{f.file.name}</span>
+                    <span className="t-strong truncate">{label}</span>
                     <span className={`t-caption ${f.error ? 'c-danger' : 'c-secondary'}`} role={f.error ? 'alert' : undefined}>
                       {f.file.name.split('.').pop()?.toUpperCase()} · {formatBytes(f.file.size)} · {f.error ?? (done ? `${f.entities?.length ?? 0} itens detectados` : 'Aguardando')}
                     </span>
                   </span>
                   {f.error ? <Badge tone="danger">Erro</Badge> : done ? <Badge tone="success">Analisado</Badge> : <Badge tone="neutral">Na fila</Badge>}
-                  <button className="icon-btn" aria-label={`Remover ${f.file.name}`} onClick={() => { setRejected([]); onRemove(f.id); }}><Icon name="x" /></button>
+                  <button className="icon-btn" aria-label={`Remover ${label}`} onClick={() => { reqIdRef.current++; setRejected([]); onRemove(f.id); }}><Icon name="x" /></button>
                 </li>
               );
             })}
           </ul>
         </section>
       )}
+
+      <label className="row gap-2 t-caption c-secondary" style={{ alignItems: 'center', cursor: watermarkLocked ? 'not-allowed' : 'pointer', opacity: watermarkLocked ? 0.65 : 1 }}>
+        <input
+          type="checkbox"
+          checked={stripRasterWatermark}
+          disabled={watermarkLocked}
+          onChange={(e) => onStripRasterWatermark(e.target.checked)}
+        />
+        <span>Remover marcas d'água claras/diagonais em PDFs escaneados e imagens (OCR local PT-BR){watermarkLocked ? ' · aplicado na análise atual' : ''}</span>
+      </label>
 
       <section className="card stack gap-5" aria-labelledby="termos-titulo">
         <button className="disclosure" aria-expanded={open} aria-controls={open ? 'termos-campos' : undefined} aria-describedby="termos-desc" onClick={() => setOpen(!open)}>

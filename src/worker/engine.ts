@@ -10,14 +10,17 @@ import { detectAll } from '../detect/pipeline';
 import type { WordClassifier, WordLabel } from '../detect/transformer';
 import { parseCsv } from '../formats/csv';
 import { parseDocx } from '../formats/docx';
+import { parseImage } from '../formats/image';
+import type { OcrEngine } from '../formats/ocr';
 import { parsePdf } from '../formats/pdf';
-import { kindOf, UnsupportedFileError, type ParsedFile } from '../formats/types';
+import { kindOf, MAX_FILE_BYTES, UnsupportedFileError, type ParsedFile } from '../formats/types';
 import { parseXlsx } from '../formats/xlsx';
 import type { FromWorker, ToWorker } from './protocol';
 
 export interface EngineDeps {
   fetchJson: <T>(path: string) => Promise<T>;
   loadNer?: (onProgress: (p: number) => void) => Promise<WordClassifier>;
+  ocr?: OcrEngine;
   post: (m: FromWorker) => void;
 }
 
@@ -49,10 +52,13 @@ export class Engine {
   async handle(msg: ToWorker): Promise<void> {
     switch (msg.type) {
       case 'init': return this.init();
-      case 'analyze': return this.analyze(msg.files, msg.terms);
+      case 'analyze': return this.analyze(msg.files, msg.terms, msg.stripRasterWatermark ?? true);
       case 'redetect': return this.detect(this.files, msg.terms);
       case 'apply': return this.apply(msg.id, msg.runId, msg.entities);
-      case 'reset': this.files = []; return;
+      case 'reset':
+        this.files = [];
+        await this.deps.ocr?.terminate();
+        return;
     }
   }
 
@@ -78,20 +84,33 @@ export class Engine {
       .catch(() => this.deps.post({ type: 'models', classic: 'ok', ner: 'indisponivel' }));
   }
 
-  private async analyze(files: { id: string; name: string; buffer: ArrayBuffer }[], terms: UserTerm[]) {
+  private async analyze(files: { id: string; name: string; buffer: ArrayBuffer }[], terms: UserTerm[], stripRasterWatermark = true) {
     if (!this.classic) await this.init();
     const opened: OpenFile[] = [];
     for (const f of files) {
       this.deps.post({ type: 'progress', id: f.id, stage: 'ler', progress: 0.05 });
       try {
-        if (f.buffer.byteLength > 50 * 1024 * 1024) throw new UnsupportedFileError('Arquivo grande demais (limite de 50 MB).', 'formato');
-        const kind = kindOf(f.name, new Uint8Array(f.buffer.slice(0, 8)));
-        if (!kind) throw new UnsupportedFileError('Formato não suportado. Use PDF, DOCX, XLSX ou CSV.', 'formato');
+        if (f.buffer.byteLength > MAX_FILE_BYTES) throw new UnsupportedFileError('Arquivo grande demais (limite de 500 MB).', 'formato');
+        const kind = kindOf(f.name, new Uint8Array(f.buffer.slice(0, 12)));
+        if (!kind) throw new UnsupportedFileError('Formato não suportado. Use PDF, DOCX, XLSX, CSV ou imagens (PNG/JPG/WEBP).', 'formato');
         const parsed =
-          kind === 'pdf' ? await parsePdf(f.name, f.buffer)
-          : kind === 'docx' ? await parseDocx(f.name, f.buffer)
-          : kind === 'xlsx' ? await parseXlsx(f.name, f.buffer)
-          : await parseCsv(f.name, f.buffer);
+          kind === 'pdf'
+            ? await parsePdf(f.name, f.buffer, {
+                ocr: this.deps.ocr,
+                stripRasterWatermark,
+                onPageProgress: (p, total) =>
+                  this.deps.post({ type: 'progress', id: f.id, stage: 'ocr', progress: 0.05 + 0.1 * (p / Math.max(1, total)) }),
+              })
+            : kind === 'image'
+              ? await (async () => {
+                  this.deps.post({ type: 'progress', id: f.id, stage: 'ocr', progress: 0.08 });
+                  return parseImage(f.name, f.buffer, { ocr: this.deps.ocr, stripRasterWatermark });
+                })()
+              : kind === 'docx'
+                ? await parseDocx(f.name, f.buffer)
+                : kind === 'xlsx'
+                  ? await parseXlsx(f.name, f.buffer)
+                  : await parseCsv(f.name, f.buffer);
         const { text, starts } = joinSegments(parsed.segments);
         opened.push({ id: f.id, parsed, text, starts });
       } catch (e) {

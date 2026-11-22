@@ -18,11 +18,15 @@ export class UnsupportedFileError extends Error {
   }
 }
 
+export const MAX_FILE_BYTES = 500 * 1024 * 1024;
+export const LARGE_FILE_WARN_BYTES = 100 * 1024 * 1024;
+
 export const MIME: Record<FileKind, string> = {
   pdf: 'application/pdf',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   csv: 'text/csv',
+  image: 'image/png',
 };
 
 /** Nome do arquivo limpo. Termos mascarados no conteúdo também saem do nome (ex.: "Contrato_Joao_Silva.pdf"). */
@@ -49,10 +53,17 @@ export function kindOf(name: string, head: Uint8Array): FileKind | null {
   const isZip = head[0] === 0x50 && head[1] === 0x4b;
   const isPdf = head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46;
   const isOle = head[0] === 0xd0 && head[1] === 0xcf; // OOXML criptografado com senha vira OLE
+  const isPng = head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47;
+  const isJpeg = head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff;
+  const isWebp =
+    head.length >= 12 &&
+    head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46 &&
+    head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50;
   if (isOle && (ext === 'docx' || ext === 'xlsx')) throw new UnsupportedFileError('Arquivo protegido por senha. Remova a senha e adicione de novo.', 'senha');
   if (ext === 'pdf' && isPdf) return 'pdf';
   if (ext === 'docx' && isZip) return 'docx';
   if (ext === 'xlsx' && isZip) return 'xlsx';
   if (ext === 'csv' || ext === 'txt') return 'csv';
+  if ((ext === 'png' && isPng) || ((ext === 'jpg' || ext === 'jpeg') && isJpeg) || (ext === 'webp' && isWebp)) return 'image';
   return null;
 }

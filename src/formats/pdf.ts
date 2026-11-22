@@ -1,12 +1,20 @@
 import type { Entity } from '../core/types';
+import { lineToCharBoxes, type OcrEngine } from './ocr';
 import { cleanName, MIME, UnsupportedFileError, type ParsedFile } from './types';
 import { countByLabel } from './report';
+import { stripLightWatermark } from './watermark';
+
+export interface PdfParseOptions {
+  ocr?: OcrEngine;
+  stripRasterWatermark?: boolean;
+  onPageProgress?: (page: number, total: number) => void;
+}
 
 /**
- * PDF com mupdf.js (WASM): extrai texto com a posição de cada caractere, aplica redação
- * REAL (o texto some do conteúdo, não é só coberto), escreve o rótulo sobre a área,
- * remove Info/XMP, anotações de marca d'água, conteúdo marcado como /Watermark e
- * camadas opcionais chamadas "marca d'água"/"watermark".
+ * PDF com mupdf.js (WASM): extrai texto com a posição de cada caractere (ou roda OCR local
+ * em páginas escaneadas/rasterizadas), aplica redação REAL (texto e pixels sob a área somem),
+ * escreve o rótulo sobre a área, remove Info/XMP, anotações de marca d'água, conteúdo /Watermark,
+ * camadas "marca d'água"/"watermark" e marcas d'água claras em páginas rasterizadas.
  */
 type Mupdf = typeof import('mupdf');
 type Quad = [number, number, number, number, number, number, number, number];
@@ -14,13 +22,17 @@ type Quad = [number, number, number, number, number, number, number, number];
 interface PageText {
   /** um segmento por linha */
   lines: { text: string; quads: Quad[] }[];
+  /** PNG com marca d'água clara removida, quando a página era rasterizada */
+  cleanRasterPng?: Uint8Array;
 }
 
 const MAX_PAGES = 2000;
+const OCR_DPI = 200;
+const MAX_RASTER_PIXELS = 40_000_000;
 let mupdfPromise: Promise<Mupdf> | null = null;
 const loadMupdf = () => (mupdfPromise ??= import('mupdf'));
 
-export async function parsePdf(name: string, buf: ArrayBuffer): Promise<ParsedFile> {
+export async function parsePdf(name: string, buf: ArrayBuffer, opts: PdfParseOptions = {}): Promise<ParsedFile> {
   const mupdf = await loadMupdf();
   let doc;
   try {
@@ -28,32 +40,102 @@ export async function parsePdf(name: string, buf: ArrayBuffer): Promise<ParsedFi
   } catch {
     throw new UnsupportedFileError('PDF corrompido ou inválido.', 'corrompido');
   }
-  if (doc.needsPassword()) throw new UnsupportedFileError('PDF protegido por senha. Remova a senha e adicione de novo.', 'senha');
+  if (doc.needsPassword()) {
+    doc.destroy();
+    throw new UnsupportedFileError('PDF protegido por senha. Remova a senha e adicione de novo.', 'senha');
+  }
   const pdf = doc.asPDF();
-  if (!pdf) throw new UnsupportedFileError('Arquivo não é um PDF.', 'formato');
-  if (pdf.countPages() > MAX_PAGES) throw new UnsupportedFileError(`PDF com mais de ${MAX_PAGES} páginas. Divida o arquivo.`, 'corrompido');
+  if (!pdf) {
+    doc.destroy();
+    throw new UnsupportedFileError('Arquivo não é um PDF.', 'formato');
+  }
+  const totalPages = pdf.countPages();
+  if (totalPages > MAX_PAGES) {
+    doc.destroy();
+    throw new UnsupportedFileError(`PDF com mais de ${MAX_PAGES} páginas. Divida o arquivo.`, 'corrompido');
+  }
   const pages: PageText[] = [];
-  let chars = 0;
-  for (let p = 0; p < pdf.countPages(); p++) {
+  let nativeChars = 0;
+  let ocrPages = 0;
+  let scannedNoOcr = 0;
+
+  for (let p = 0; p < totalPages; p++) {
     const page = pdf.loadPage(p);
-    // mediabox-clip=no: texto posicionado fora da página também é extraído (e depois redigido)
-    const st = page.toStructuredText('preserve-whitespace,mediabox-clip=no');
-    const lines: PageText['lines'] = [];
-    let cur: PageText['lines'][number] | null = null;
-    st.walk({
-      beginLine() { cur = { text: '', quads: [] }; },
-      onChar(c, _o, _f, _s, quad) {
-        if (!cur) return;
-        cur.text += c;
-        // cada code unit recebe o quad (chars fora do BMP ocupam 2)
-        for (let k = 0; k < c.length; k++) cur.quads.push(quad as Quad);
-      },
-      endLine() { if (cur) { lines.push(cur); chars += cur.text.trim().length; } cur = null; },
-    });
-    pages.push({ lines });
+    try {
+      // mediabox-clip=no: texto posicionado fora da página também é extraído (e depois redigido)
+      const st = page.toStructuredText('preserve-whitespace,mediabox-clip=no');
+      const lines: PageText['lines'] = [];
+      let pageChars = 0;
+      let cur: PageText['lines'][number] | null = null;
+      try {
+        st.walk({
+          beginLine() { cur = { text: '', quads: [] }; },
+          onChar(c, _o, _f, _s, quad) {
+            if (!cur) return;
+            cur.text += c;
+            // cada code unit recebe o quad (chars fora do BMP ocupam 2)
+            for (let k = 0; k < c.length; k++) cur.quads.push(quad as Quad);
+          },
+          endLine() { if (cur) { lines.push(cur); pageChars += cur.text.trim().length; } cur = null; },
+        });
+      } finally {
+        st.destroy();
+      }
+      nativeChars += pageChars;
+
+      let cleanRasterPng: Uint8Array | undefined;
+      if (pageChars < 20) {
+        if (opts.ocr) {
+          const bounds = page.getBounds();
+          const pageW = Math.max(1, bounds[2] - bounds[0]);
+          const pageH = Math.max(1, bounds[3] - bounds[1]);
+          // Limita a 40 MP para evitar OOM em páginas com MediaBox extremo.
+          const maxScale = Math.sqrt(MAX_RASTER_PIXELS / (pageW * pageH));
+          const scale = Math.min(OCR_DPI / 72, maxScale);
+          // alpha=false (fundo branco opaco) e showExtras=false (não queima anotações/formulários não analisados).
+          const pm = page.toPixmap(mupdf.Matrix.scale(scale, scale), mupdf.ColorSpace.DeviceRGB, false, false);
+          let pngForOcr: Uint8Array;
+          try {
+            if (opts.stripRasterWatermark !== false) {
+              const px = pm.getPixels();
+              const wm = stripLightWatermark(px, pm.getWidth(), pm.getHeight(), 3);
+              if (wm.modified) cleanRasterPng = pm.asPNG().slice();
+            }
+            pngForOcr = cleanRasterPng ?? pm.asPNG().slice();
+          } finally {
+            pm.destroy();
+          }
+          const ocrRes = await opts.ocr.recognize(new Blob([pngForOcr as BlobPart], { type: 'image/png' }));
+          for (const line of ocrRes.lines) {
+            const mapped = lineToCharBoxes(line.words);
+            if (!mapped.text.trim()) continue;
+            const quads: Quad[] = mapped.boxes.map((b) => {
+              const x0 = bounds[0] + b.x0 / scale;
+              const y0 = bounds[1] + b.y0 / scale;
+              const x1 = bounds[0] + b.x1 / scale;
+              const y1 = bounds[1] + b.y1 / scale;
+              return [x0, y0, x1, y0, x0, y1, x1, y1];
+            });
+            lines.push({ text: mapped.text, quads });
+          }
+          ocrPages++;
+          opts.onPageProgress?.(p + 1, totalPages);
+        } else {
+          scannedNoOcr++;
+        }
+      }
+
+      pages.push({ lines, cleanRasterPng });
+    } finally {
+      page.destroy();
+    }
   }
   const warnings: string[] = [];
-  if (chars < 20 * Math.max(1, pages.length)) warnings.push('PDF escaneado ou sem texto: o conteúdo das imagens não foi analisado. Só os metadados foram limpos.');
+  if (scannedNoOcr > 0 && nativeChars < 20 * Math.max(1, pages.length)) {
+    warnings.push('PDF escaneado ou sem texto: o conteúdo das imagens não foi analisado. Só os metadados foram limpos.');
+  } else if (ocrPages > 0) {
+    warnings.push(`OCR local aplicado em ${ocrPages} ${ocrPages === 1 ? 'página rasterizada' : 'páginas rasterizadas'}. Revise os itens detectados antes de compartilhar.`);
+  }
   const segments = pages.flatMap((pg) => pg.lines.map((l) => l.text));
 
   return {
@@ -96,6 +178,12 @@ export async function parsePdf(name: string, buf: ArrayBuffer): Promise<ParsedFi
             redactions++;
           }
         }
+        // Se a página rasterizada teve marca d'água clara removida, substitui o conteúdo pela imagem limpa antes das redações.
+        const cleanPng = pages[p]!.cleanRasterPng;
+        if (cleanPng) {
+          replacePageWithImage(mupdf, pdf, page, cleanPng);
+          watermarks++;
+        }
         watermarks += stripWatermarkContent(pageObj);
         if (redactions) {
           // black_boxes=false; imagens sob a área: pixels apagados (2); texto: remove (0)
@@ -135,12 +223,14 @@ export async function parsePdf(name: string, buf: ArrayBuffer): Promise<ParsedFi
         root.delete('Names');
       }
       if (watermarks) metadata.push({ description: 'Marca d\'água', count: watermarks });
-      const out = pdf.saveToBuffer('garbage=4,compress=yes,clean=yes,sanitize=yes').asUint8Array();
+      const outBuf = pdf.saveToBuffer('garbage=4,compress=yes,clean=yes,sanitize=yes');
+      const out = outBuf.asUint8Array().slice();
+      outBuf.destroy();
       const all = masks.flat();
       const leftover = verifyPdf(mupdf, out, all);
       if (leftover) warnings.push(`Autoverificação: "${leftover}" ainda aparece no PDF limpo. Revise antes de compartilhar.`);
       return {
-        blob: new Blob([out.slice() as BlobPart], { type: MIME.pdf }),
+        blob: new Blob([out as BlobPart], { type: MIME.pdf }),
         fileName: cleanName(name, all),
         report: { fileName: cleanName(name, all), kind: 'pdf', entities: countByLabel(all), maskedCount: all.length, metadata, watermarksRemoved: watermarks, warnings },
       };
@@ -158,6 +248,34 @@ function bbox(qs: Quad[]): [number, number, number, number] {
 function expand(q: Quad): Quad {
   const [x0, y0, x1, , , y2] = q;
   return [x0 - 0.3, y0 - 0.3, x1 + 0.3, q[3] - 0.3, q[4] - 0.3, y2 + 0.3, q[6] + 0.3, q[7] + 0.3];
+}
+
+/** Substitui o conteúdo de uma página rasterizada pela imagem já sem marca d'água clara, normalizando MediaBox/Rotate. */
+function replacePageWithImage(mupdf: Mupdf, pdf: import('mupdf').PDFDocument, page: import('mupdf').PDFPage, png: Uint8Array) {
+  const [x0, y0, x1, y1] = page.getBounds();
+  const w = Math.max(1, x1 - x0);
+  const h = Math.max(1, y1 - y0);
+  const img = new mupdf.Image(png);
+  let imgRef;
+  try {
+    imgRef = pdf.addImage(img);
+  } finally {
+    img.destroy();
+  }
+  const pageObj = page.getObject();
+  const box = pdf.newArray();
+  box.push(0); box.push(0); box.push(w); box.push(h);
+  pageObj.put('MediaBox', box);
+  pageObj.delete('CropBox');
+  pageObj.put('Rotate', 0);
+  const res = pdf.newDictionary();
+  const xobj = pdf.newDictionary();
+  xobj.put('DCRaster', imgRef);
+  res.put('XObject', xobj);
+  pageObj.put('Resources', res);
+  const ops = `q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} 0 0 cm /DCRaster Do Q\n`;
+  const stream = pdf.addStream(ops, pdf.newDictionary());
+  pageObj.put('Contents', stream);
 }
 
 /** Escreve o rótulo como conteúdo de página (não como anotação, para não sumir em visualizadores). */
@@ -249,9 +367,25 @@ function verifyPdf(mupdf: Mupdf, data: Uint8Array, entities: Entity[]): string |
   const needles = [...new Set(entities.map((e) => e.text.trim()).filter((t) => t.replace(/\W/g, '').length >= 4))];
   if (!needles.length) return null;
   const doc = mupdf.Document.openDocument(data, 'application/pdf');
-  let text = '';
-  for (let i = 0; i < doc.countPages(); i++) text += doc.loadPage(i).toStructuredText('preserve-whitespace,mediabox-clip=no').asText() + '\n';
-  text += ['info:Title', 'info:Author', 'info:Subject', 'info:Keywords', 'info:Creator', 'info:Producer'].map((k) => doc.getMetaData(k) ?? '').join('\n');
-  const flat = text.replace(/\s+/g, ' ');
-  return needles.find((n) => flat.includes(n.replace(/\s+/g, ' '))) ?? null;
+  try {
+    let text = '';
+    for (let i = 0; i < doc.countPages(); i++) {
+      const p = doc.loadPage(i);
+      try {
+        const st = p.toStructuredText('preserve-whitespace,mediabox-clip=no');
+        try {
+          text += st.asText() + '\n';
+        } finally {
+          st.destroy();
+        }
+      } finally {
+        p.destroy();
+      }
+    }
+    text += ['info:Title', 'info:Author', 'info:Subject', 'info:Keywords', 'info:Creator', 'info:Producer'].map((k) => doc.getMetaData(k) ?? '').join('\n');
+    const flat = text.replace(/\s+/g, ' ');
+    return needles.find((n) => flat.includes(n.replace(/\s+/g, ' '))) ?? null;
+  } finally {
+    doc.destroy();
+  }
 }

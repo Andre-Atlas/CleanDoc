@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 import { loadBertNer } from '../detect/transformer';
+import { createTesseractOcr } from '../formats/ocr';
 import { Engine } from './engine';
 import type { FromWorker, ToWorker } from './protocol';
 
@@ -28,6 +29,7 @@ const engine = new Engine({
     // caminho RELATIVO: o transformers.js ignora caminhos locais que são URLs completas
     return loadBertNer({ modelPath: '/models/', wasmBase: new URL('/ort/', self.location.origin).href, onProgress });
   },
+  ocr: createTesseractOcr(self.location.origin),
   post: (m: FromWorker) => self.postMessage(m),
 });
 

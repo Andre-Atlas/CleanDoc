@@ -76,7 +76,7 @@ export interface UserTerm {
   label?: string;
 }
 
-export type FileKind = 'pdf' | 'docx' | 'xlsx' | 'csv';
+export type FileKind = 'pdf' | 'docx' | 'xlsx' | 'csv' | 'image';
 
 export interface MetadataRemoval {
   /** Descrição legível sem valores originais, ex.: "Autor e empresa do arquivo". */

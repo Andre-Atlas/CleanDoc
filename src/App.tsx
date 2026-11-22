@@ -29,6 +29,7 @@ export function App({ createWorker = defaultWorker }: { createWorker?: () => Wor
   const [terms, setTerms] = useState<TermFields>(emptyTerms);
   const [extra, setExtra] = useState<UserTerm[]>([]);
   const [review, setReview] = useState<ReviewState>(emptyReview);
+  const [stripRasterWatermark, setStripRasterWatermark] = useState(true);
   /** termos usados na última detecção, para saber se mudaram ao voltar da revisão */
   const detectedWith = useRef('');
   const allTerms = toUserTerms(terms, extra);
@@ -45,7 +46,7 @@ export function App({ createWorker = defaultWorker }: { createWorker?: () => Wor
   // Novos arquivos: analisa (a detecção roda sobre todos, com os termos atuais, por causa da propagação).
   const start = () => {
     detectedWith.current = termsKey;
-    c.analyze(allTerms);
+    c.analyze(allTerms, { stripRasterWatermark });
     setScreen('processamento');
   };
   const continueReview = () => {
@@ -90,7 +91,19 @@ export function App({ createWorker = defaultWorker }: { createWorker?: () => Wor
     <div className="app">
       <AppHeader step={step} />
       {screen === 'entrada' && (
-        <Entrada files={c.files} models={c.models} terms={terms} onTerms={setTerms} onAdd={c.addFiles} onRemove={c.removeFile} onClear={clear} onStart={start} onContinue={continueReview} />
+        <Entrada
+          files={c.files}
+          models={c.models}
+          terms={terms}
+          onTerms={setTerms}
+          stripRasterWatermark={stripRasterWatermark}
+          onStripRasterWatermark={setStripRasterWatermark}
+          onAdd={c.addFiles}
+          onRemove={c.removeFile}
+          onClear={clear}
+          onStart={start}
+          onContinue={continueReview}
+        />
       )}
       {screen === 'processamento' && <Processamento files={c.files} busy={c.busy} onCancel={cancel} onReview={() => setScreen('revisao')} />}
       {screen === 'revisao' && (

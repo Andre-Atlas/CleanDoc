@@ -1,6 +1,7 @@
 import JSZip from 'jszip';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { CATEGORY_NAMES } from '../../core/types';
+import { sanitizeZipPath } from '../../formats/zip';
 import { Button, Icon } from '../components';
 import type { FileItem } from '../useCleaner';
 
@@ -32,9 +33,17 @@ export function buildReport(files: FileItem[], termsApplied: number): string {
   return lines.join('\n');
 }
 
+function cleanOutputPath(f: FileItem): string {
+  const safeRel = f.relativePath ? sanitizeZipPath(f.relativePath) : null;
+  const dir = safeRel && safeRel.includes('/') ? safeRel.slice(0, safeRel.lastIndexOf('/') + 1) : '';
+  return `${dir}${f.result!.fileName}`;
+}
+
 export function Concluido({ files, termsApplied, onClear, onRetry }: { files: FileItem[]; termsApplied: number; onClear: () => void; onRetry: () => void }) {
   const [zipping, setZipping] = useState(false);
   const [zipError, setZipError] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
   const done = files.filter((f) => f.result);
   const failed = files.filter((f) => f.applyError || f.status === 'erro');
   const masked = done.reduce((s, f) => s + (f.result?.report.maskedCount ?? 0), 0);
@@ -48,17 +57,20 @@ export function Concluido({ files, termsApplied, onClear, onRetry }: { files: Fi
       const z = new JSZip();
       const used = new Set<string>();
       for (const f of done) {
+        const basePath = cleanOutputPath(f);
         // nomes iguais não se sobrescrevem no .zip
-        let name = f.result!.fileName;
-        for (let i = 2; used.has(name); i++) name = f.result!.fileName.replace(/(\.[^.]+)?$/, `_${i}$1`);
+        let name = basePath;
+        for (let i = 2; used.has(name); i++) name = basePath.replace(/(\.[^.]+)?$/, `_${i}$1`);
         used.add(name);
         z.file(name, f.result!.blob, { date: new Date(Date.UTC(2000, 0, 1)) });
       }
-      download(await z.generateAsync({ type: 'blob', compression: 'DEFLATE' }), 'documentos_limpos.zip');
+      const out = await z.generateAsync({ type: 'blob', compression: 'DEFLATE', platform: 'DOS', comment: '' });
+      if (!mounted.current) return;
+      download(out, 'documentos_limpos.zip');
     } catch {
-      setZipError(true);
+      if (mounted.current) setZipError(true);
     } finally {
-      setZipping(false);
+      if (mounted.current) setZipping(false);
     }
   };
 
@@ -73,7 +85,7 @@ export function Concluido({ files, termsApplied, onClear, onRetry }: { files: Fi
         <div className="notice danger stack gap-2" role="alert">
           <strong className="t-label">{failed.length === 1 ? '1 arquivo NÃO foi limpo' : `${failed.length} arquivos NÃO foram limpos`}. Não compartilhe os originais.</strong>
           <ul className="t-caption" style={{ margin: 0, paddingLeft: 18 }}>
-            {failed.map((f) => <li key={f.id}>{f.file.name}: {f.applyError ?? f.error}</li>)}
+            {failed.map((f) => <li key={f.id}>{f.relativePath ?? f.file.name}: {f.applyError ?? f.error}</li>)}
           </ul>
           {failed.some((f) => f.applyError) && <Button variant="secondary" onClick={onRetry} style={{ alignSelf: 'flex-start' }}>Tentar de novo</Button>}
         </div>
@@ -87,14 +99,15 @@ export function Concluido({ files, termsApplied, onClear, onRetry }: { files: Fi
         {done.map((f) => {
           const r = f.result!.report;
           const warn = r.warnings.find((w) => /escaneado/.test(w));
+          const displayPath = cleanOutputPath(f);
           return (
             <li key={f.id} className="list-row">
               <Icon name="file" size={18} className="c-secondary" />
               <span className="file-text">
-                <span className="t-strong truncate">{f.result!.fileName}</span>
+                <span className="t-strong truncate">{displayPath}</span>
                 <span className={`t-caption ${warn ? 'c-warning' : 'c-secondary'}`}>{warn ? 'Só metadados (PDF escaneado)' : `${r.maskedCount} itens · ${r.metadata.reduce((a, m) => a + m.count, 0)} metadados`}</span>
               </span>
-              <Button variant="secondary" onClick={() => download(f.result!.blob, f.result!.fileName)} aria-label={`Baixar ${f.result!.fileName}`}>
+              <Button variant="secondary" onClick={() => download(f.result!.blob, f.result!.fileName)} aria-label={`Baixar ${displayPath}`}>
                 <Icon name="download" /> Baixar
               </Button>
             </li>

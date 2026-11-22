@@ -27,11 +27,13 @@ export function buildCloudflareHeaders(vercelConfig) {
   const blocks = [];
   let hasAssetsCache = false;
   let hasOrtCache = false;
+  let hasOcrCache = false;
 
   for (const rule of vercelConfig.headers ?? []) {
     const route = toCloudflareRoute(rule.source);
     if (route === '/assets/*') hasAssetsCache = true;
     if (route === '/ort/*') hasOrtCache = true;
+    if (route === '/ocr/*') hasOcrCache = true;
     const lines = [route, ...rule.headers.map((h) => `  ${h.key}: ${h.value}`)];
     blocks.push(lines.join('\n'));
   }
@@ -42,6 +44,10 @@ export function buildCloudflareHeaders(vercelConfig) {
 
   if (!hasOrtCache) {
     blocks.push('/ort/*\n  Cache-Control: public, max-age=31536000, immutable');
+  }
+
+  if (!hasOcrCache) {
+    blocks.push('/ocr/*\n  Cache-Control: public, max-age=31536000, immutable');
   }
 
   return `${blocks.join('\n\n')}\n`;

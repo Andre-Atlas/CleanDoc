@@ -2,7 +2,7 @@
 
 Anonimiza documentos **no seu navegador**: nomes, empresas, locais, valores, documentos (CPF/CNPJ/RG), contatos e dados bancários viram rótulos como `[nome pessoal]` e `[empresa]`, e metadados e marcas d'água são removidos. Nenhum arquivo sai do computador e nada é salvo.
 
-Formatos: **PDF, DOCX, XLSX e CSV**, vários de uma vez.
+Formatos: **PDF (incluindo escaneados/rasterizados via OCR local PT-BR), DOCX, XLSX, CSV, imagens (PNG/JPG/WEBP) e pacotes ZIP**, vários de uma vez (até **500 MB** por arquivo).
 
 ## Como funciona
 

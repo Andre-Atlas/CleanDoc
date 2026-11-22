@@ -3,13 +3,14 @@ import type { FileItem } from '../useCleaner';
 
 const STAGES = [
   ['ler', 'Ler'],
+  ['ocr', 'OCR (imagens)'],
   ['termos', 'Termos e regras'],
   ['crf', 'ML clássico (CRF)'],
   ['transformer', 'Transformer PT-BR'],
   ['nlu', 'NLU e propagação'],
   ['pronto', 'Pronto para revisar'],
 ] as const;
-const ORDER: Record<string, number> = { ler: 0, termos: 1, regras: 1, crf: 2, transformer: 3, nlu: 4, pronto: 5 };
+const ORDER: Record<string, number> = { ler: 0, ocr: 1, termos: 2, regras: 2, crf: 3, transformer: 4, nlu: 5, pronto: 6 };
 
 export function Processamento({ files, busy, onCancel, onReview }: { files: FileItem[]; busy: boolean; onCancel: () => void; onReview: () => void }) {
   const done = files.filter((f) => f.status === 'pronto').length;
@@ -71,13 +72,14 @@ function Row({ f }: { f: FileItem }) {
     icon = scanned ? <Icon name="alert" size={18} className="c-warning" /> : <Icon name="check" size={18} className="c-success" />;
     meta = scanned ? 'Escaneado: sem texto. Só os metadados serão limpos.' : `${n} ${n === 1 ? 'item detectado' : 'itens detectados'}`;
   }
+  const displayName = f.relativePath ?? f.file.name;
   return (
     <li className="file-row">
       <span className="file-icon"><Icon name="file" size={18} /></span>
       <span className="file-text">
-        <span className="t-strong truncate">{f.file.name}</span>
+        <span className="t-strong truncate">{displayName}</span>
         <span className={`t-caption ${f.status === 'erro' ? 'c-danger' : scanned ? 'c-warning' : 'c-secondary'}`} role={f.status === 'erro' ? 'alert' : undefined}>{ext} · {formatBytes(f.file.size)} · {meta}</span>
-        {f.status === 'processando' && <ProgressBar value={f.progress} label={`Progresso de ${f.file.name}`} />}
+        {f.status === 'processando' && <ProgressBar value={f.progress} label={`Progresso de ${displayName}`} />}
       </span>
       {badge}
       {icon}

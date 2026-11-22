@@ -9,7 +9,7 @@ import { UnsupportedFileError } from './types';
 export const FIXED_DATE = new Date(Date.UTC(2000, 0, 1));
 
 /** Limites contra zip bomb: descompactado total e número de entradas. */
-export const MAX_UNCOMPRESSED = 400 * 1024 * 1024;
+export const MAX_UNCOMPRESSED = 1024 * 1024 * 1024;
 export const MAX_ENTRIES = 5000;
 
 /** Passes de texto: [elemento que delimita o segmento, elemento de texto]. */
@@ -59,7 +59,7 @@ export class OpcPackage {
     const entries = Object.values(zip.files);
     const size = entries.reduce((s, f) => s + ((f as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0), 0);
     if (entries.length > MAX_ENTRIES || size > MAX_UNCOMPRESSED)
-      throw new UnsupportedFileError('Arquivo grande demais depois de descompactado (limite de 400 MB).', 'corrompido');
+      throw new UnsupportedFileError('Arquivo grande demais depois de descompactado (limite de 1 GB).', 'corrompido');
     return new OpcPackage(zip);
   }
 
