@@ -78,7 +78,28 @@ ml/.venv/bin/python ml/gen.py 8000 && ml/.venv/bin/python ml/train.py
 
 ## Deploy
 
-Site estático. Na Vercel: importe o repositório (framework Vite). O `prebuild` baixa o modelo e copia o runtime ONNX, e o `vercel.json` aplica a CSP e o cache dos modelos.
+Site estático, com processamento 100% no navegador.
+
+### Cloudflare Workers (Static Assets) + R2 (recomendado — egress gratuito ilimitado)
+
+Como o modelo NER (`171 MB`) e o runtime ONNX (`26 MB`) excedem o limite de 25 MiB por arquivo do Cloudflare Static Assets, eles ficam num bucket R2 e são servidos na **mesma origem** por `worker/index.ts` (preservando `CSP connect-src 'self'` e `COOP/COEP/CORP`):
+
+```bash
+# 1. Autenticar na Cloudflare (uma única vez)
+npx wrangler login
+
+# 2. Criar o bucket R2 e enviar os 2 binários > 25 MiB (uma única vez ou ao trocar de modelo)
+npx wrangler r2 bucket create cleandoc-models
+npm run models:fetch
+npm run cf:upload-models
+
+# 3. Gerar o bundle dist-cf/ e publicar o Worker
+npm run deploy:cf
+```
+
+### Vercel (plano Pro)
+
+Na Vercel Pro (suporta até 1 GB por arquivo estático), importe o repositório com framework Vite. O `prebuild` baixa o modelo e copia o runtime ONNX, e o `vercel.json` aplica a CSP e o cache dos modelos. (No plano Vercel Hobby, o limite é 100 MB por arquivo, abaixo dos 171 MB do modelo ONNX.)
 
 ## Licenças
 
